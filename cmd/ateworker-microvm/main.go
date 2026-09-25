@@ -43,11 +43,13 @@ import (
 	"github.com/agent-substrate/substrate/internal/ateinterceptors"
 	"github.com/agent-substrate/substrate/internal/ateworker/actornet"
 	"github.com/agent-substrate/substrate/internal/ateworker/cgroup"
+	"github.com/agent-substrate/substrate/internal/ateworker/overcommit"
 	"github.com/agent-substrate/substrate/internal/ateworker/pid1"
 	"github.com/agent-substrate/substrate/internal/ateworker/register"
 	"github.com/agent-substrate/substrate/internal/ateworker/tunnel"
 	"github.com/agent-substrate/substrate/internal/nodepath"
 	"github.com/agent-substrate/substrate/internal/otlprelay"
+	"github.com/agent-substrate/substrate/internal/overcommit/predictor"
 	"github.com/agent-substrate/substrate/internal/preview"
 	"github.com/agent-substrate/substrate/internal/proto/ateworkerpb"
 	"github.com/agent-substrate/substrate/internal/resources"
@@ -80,6 +82,11 @@ var (
 	readinessListenAddress = pflag.String("readiness-listen-address", "0.0.0.0:8080", "Address for the HTTP /readyz and /healthz probes")
 	maxActors              = pflag.Int("max-actors", 1000, "How many actors this worker will host at once")
 	usageSampleInterval    = pflag.Duration("usage-sample-interval", time.Minute, "How often the ateworker samples the resource usage of its actors. Each sample writes an ate.actor.usage_sampled record per actor, and GetActiveWorkloadStats serves the latest.")
+
+	enableOvercommit           = pflag.Bool("enable-overcommit", false, "Enable worker-level overcommit: hand back to the control plane what hosted actors are not predicted to use. Must match the ateapi's --enable-overcommit.")
+	overcommitMaturationWindow = pflag.Duration("overcommit-maturation-window", overcommit.DefaultMaturationWindow, "How long an actor runs before its usage is trusted for overcommit predictions.")
+	overcommitHistoryWindow    = pflag.Duration("overcommit-history-window", overcommit.DefaultHistoryWindow, "How much usage history overcommit predictions consider.")
+	overcommitPollInterval     = pflag.Duration("overcommit-poll-interval", overcommit.DefaultPollInterval, "How often overcommit samples usage and adjusts the Worker's allocation.")
 )
 
 // minUsageSampleInterval is the floor of --usage-sample-interval, the same as
@@ -122,6 +129,9 @@ func do(ctx context.Context) error {
 	}
 	if *usageSampleInterval < minUsageSampleInterval {
 		return fmt.Errorf("--usage-sample-interval must be at least %v, got %v", minUsageSampleInterval, *usageSampleInterval)
+	}
+	if *enableOvercommit && *overcommitPollInterval <= 0 {
+		return fmt.Errorf("--overcommit-poll-interval must be positive, got %s", *overcommitPollInterval)
 	}
 
 	const serviceName = "ateworker-microvm"
@@ -244,6 +254,14 @@ func do(ctx context.Context) error {
 	ateworkerService.usage = workerstats.NewUsageEmitter(lp, usageStdout, pool)
 	defer workerstats.StartSampler(ctx, *usageSampleInterval, func(ctx context.Context) { ateworkerService.sweepUsage(ctx) })()
 
+	if *enableOvercommit {
+		controller, err := newOvercommitController(ateworkerService)
+		if err != nil {
+			return err
+		}
+		go controller.Run(ctx)
+	}
+
 	svr := grpc.NewServer(
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.UnaryInterceptor(ateinterceptors.InternalServerUnaryInterceptor),
@@ -298,6 +316,30 @@ func do(ctx context.Context) error {
 		return fmt.Errorf("while serving: %w", err)
 	}
 	return nil
+}
+
+// newOvercommitController builds the overcommit controller, reaching the
+// node-local atelet the way the capacity report does.
+func newOvercommitController(s *AteWorkerService) (*overcommit.Controller, error) {
+	adjuster, err := overcommit.NewGRPCAdjuster(overcommit.DialConfig{
+		SocketPath:           nodepath.WorkerSupportSocket,
+		CredentialBundlePath: tunnelConfig.CredentialBundle,
+		TrustBundlePath:      tunnelConfig.TrustBundle,
+		AteletSPIFFEID:       tunnelConfig.BrokerIdentity,
+	})
+	if err != nil {
+		return nil, err
+	}
+	sampler := func(ctx context.Context) (*ateworkerpb.GetActiveWorkloadStatsResponse, error) {
+		return s.GetActiveWorkloadStats(ctx, &ateworkerpb.GetActiveWorkloadStatsRequest{})
+	}
+	strategy := predictor.NewWindowedMaxPredictor(*overcommitMaturationWindow, *overcommitHistoryWindow)
+	slog.Info("Worker-level overcommit enabled",
+		slog.String("strategy", strategy.Name()),
+		slog.Duration("maturation_window", *overcommitMaturationWindow),
+		slog.Duration("history_window", *overcommitHistoryWindow),
+		slog.Duration("poll_interval", *overcommitPollInterval))
+	return overcommit.NewController(sampler, strategy, adjuster, *overcommitPollInterval), nil
 }
 
 // ensureSharedPropagation makes path a mount point with rshared propagation
