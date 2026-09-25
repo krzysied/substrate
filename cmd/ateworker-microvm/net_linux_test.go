@@ -29,6 +29,7 @@ import (
 	"github.com/agent-substrate/substrate/internal/nodepath"
 	"github.com/agent-substrate/substrate/internal/resources"
 	"github.com/agent-substrate/substrate/internal/roottest"
+	"github.com/agent-substrate/substrate/internal/sizing"
 )
 
 // Hosting an actor that is already hosted replaces its network rather than
@@ -52,7 +53,7 @@ func TestHostActorReplacesSameActor(t *testing.T) {
 		}
 	})
 	for range 2 {
-		if _, err := service.hostActor(ctx, resources.ActorAttribution{UID: actorUID}, false); err != nil {
+		if _, err := service.hostActor(ctx, resources.ActorAttribution{UID: actorUID}, sizing.SandboxSize{}, false); err != nil {
 			t.Fatal(err)
 		}
 	}

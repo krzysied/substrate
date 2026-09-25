@@ -619,7 +619,7 @@ func (s *AteWorkerService) RunWorkload(ctx context.Context, req *ateworkerpb.Run
 		return nil, err
 	}
 	// Publish attribution before boot so stats can include startup usage.
-	hosted, err := s.hostActor(ctx, attribution, req.GetActorDirs())
+	hosted, err := s.hostActor(ctx, attribution, req.GetActorDirs(), sizing.FromLimits(req.GetCpuMilli(), req.GetMemoryBytes()))
 	if err != nil {
 		return nil, err
 	}
@@ -988,7 +988,7 @@ func (s *AteWorkerService) RestoreWorkload(ctx context.Context, req *ateworkerpb
 	if err != nil {
 		return nil, err
 	}
-	hosted, err := s.hostActor(ctx, attribution, req.GetActorDirs())
+	hosted, err := s.hostActor(ctx, attribution, req.GetActorDirs(), sizing.FromLimits(req.GetCpuMilli(), req.GetMemoryBytes()))
 	timing.netSetup = lap(&tLast)
 	if err != nil {
 		return nil, err

@@ -150,7 +150,7 @@ func (s *AteWorkerService) GetActiveWorkloadStats(ctx context.Context, req *atew
 	for _, h := range hosted {
 		sample := h.usage.Latest()
 		if sample == nil {
-			sample = h.usage.WithEpoch(pendingSample(&h.attribution))
+			sample = h.usage.WithEpoch(h.describe(pendingSample(&h.attribution)))
 		}
 		samples = append(samples, sample)
 	}
@@ -193,7 +193,7 @@ func (s *AteWorkerService) sampleHostedGuest(ctx context.Context, h *hostedActor
 	if !h.usage.Sampling() {
 		return
 	}
-	sample := h.usage.WithEpoch(pendingSample(&h.attribution))
+	sample := h.usage.WithEpoch(h.describe(pendingSample(&h.attribution)))
 	measured, err := h.usage.Measure(ctx, func() (*ateworkerpb.WorkloadStatsSample, map[string]uint64, error) {
 		return s.sampleGuestInSlot(ctx, h)
 	})
@@ -288,7 +288,7 @@ func (s *AteWorkerService) readFinal(ctx context.Context, h *hostedActor) {
 // recordFinal writes the final record of an activation that a checkpoint or a
 // terminate ended, from its newest measured sample.
 func (s *AteWorkerService) recordFinal(ctx context.Context, h *hostedActor) {
-	pending := h.usage.WithEpoch(pendingSample(&h.attribution))
+	pending := h.usage.WithEpoch(h.describe(pendingSample(&h.attribution)))
 	h.usage.Final(func(measured *ateworkerpb.WorkloadStatsSample) {
 		if measured == nil {
 			measured = pending
@@ -360,7 +360,7 @@ func (s *AteWorkerService) sampleGuest(ctx context.Context, h *hostedActor) (*at
 		return nil, nil, fmt.Errorf("no container stats from the guest agent: %w", err)
 	}
 
-	return &ateworkerpb.WorkloadStatsSample{
+	return h.describe(&ateworkerpb.WorkloadStatsSample{
 		Atespace:              active.Ref.Atespace,
 		ActorName:             active.Ref.Name,
 		ActorUid:              active.UID,
@@ -376,7 +376,7 @@ func (s *AteWorkerService) sampleGuest(ctx context.Context, h *hostedActor) (*at
 		CpuUsageUsec:          sample.CPUUsageUsec,
 
 		ObservedAtUnixNano: observedAt.UnixNano(),
-	}, cpuByContainer, nil
+	}), cpuByContainer, nil
 }
 
 // sumContainerStats reads every container of the actor and adds them up. It
