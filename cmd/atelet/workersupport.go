@@ -147,11 +147,19 @@ func toWorkerResources(in *ateletpb.WorkerResources) *ateapipb.WorkerResources {
 		return nil
 	}
 	out := &ateapipb.WorkerResources{Actors: in.GetActors()}
-	if r := in.GetResources(); r != nil {
-		out.Resources = &ateapipb.Resources{}
-		for _, l := range r.GetLimits() {
-			out.Resources.Limits = append(out.Resources.Limits, &ateapipb.Limits{Name: l.GetName(), Quantity: l.GetQuantity()})
-		}
+	out.Resources = toAteAPIResources(in.GetResources())
+	return out
+}
+
+// toAteAPIResources converts atelet's Resources to the control plane's, which
+// it mirrors field for field.
+func toAteAPIResources(in *ateletpb.Resources) *ateapipb.Resources {
+	if in == nil {
+		return nil
+	}
+	out := &ateapipb.Resources{}
+	for _, l := range in.GetLimits() {
+		out.Limits = append(out.Limits, &ateapipb.Limits{Name: l.GetName(), Quantity: l.GetQuantity()})
 	}
 	return out
 }
@@ -223,6 +231,56 @@ func (s *workerSupportServer) RequestActorSuspend(ctx context.Context, req *atel
 		slog.String("actor_name", req.GetActorName()),
 		slog.String("actor_uid", req.GetActorUid()))
 	return &ateletpb.RequestActorSuspendResponse{}, nil
+}
+
+// AddWorkerAllocated forwards the calling worker's request to grow its
+// allocated resources, which it makes under overcommit when an actor's usage
+// grows.
+//
+// The control plane's error is returned unwrapped so the worker can tell a
+// refusal from a transport failure it should retry.
+func (s *workerSupportServer) AddWorkerAllocated(ctx context.Context, req *ateletpb.AddWorkerAllocatedRequest) (*ateletpb.AddWorkerAllocatedResponse, error) {
+	// Identity comes only from the mTLS certificate, never from the request:
+	// a worker can adjust its own allocation and no one else's.
+	workerIdentity, err := authenticatedWorkerIdentity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if errs := apivalidation.ValidateAddWorkerAllocatedRequest(ctx, req); len(errs) > 0 {
+		return nil, resources.ToGRPCStatusError(errs)
+	}
+	if _, err := s.workers.AddWorkerAllocated(ctx, &ateapipb.AddWorkerAllocatedRequest{
+		// Workers are global-scoped and named by their pod UID.
+		Worker:        &ateapipb.ObjectRef{Name: workerIdentity.PodUID},
+		ResourceDelta: toAteAPIResources(req.GetResourceDelta()),
+	}); err != nil {
+		return nil, err
+	}
+	slog.DebugContext(ctx, "Forwarded a worker allocation increase",
+		slog.String("pod_uid", workerIdentity.PodUID), slog.Any("resource_delta", req.GetResourceDelta()))
+	return &ateletpb.AddWorkerAllocatedResponse{}, nil
+}
+
+// SubtractWorkerAllocated forwards the calling worker's request to hand back
+// allocated resources its actors are not using. It is AddWorkerAllocated in
+// the other direction.
+func (s *workerSupportServer) SubtractWorkerAllocated(ctx context.Context, req *ateletpb.SubtractWorkerAllocatedRequest) (*ateletpb.SubtractWorkerAllocatedResponse, error) {
+	workerIdentity, err := authenticatedWorkerIdentity(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if errs := apivalidation.ValidateSubtractWorkerAllocatedRequest(ctx, req); len(errs) > 0 {
+		return nil, resources.ToGRPCStatusError(errs)
+	}
+	if _, err := s.workers.SubtractWorkerAllocated(ctx, &ateapipb.SubtractWorkerAllocatedRequest{
+		Worker:        &ateapipb.ObjectRef{Name: workerIdentity.PodUID},
+		ResourceDelta: toAteAPIResources(req.GetResourceDelta()),
+	}); err != nil {
+		return nil, err
+	}
+	slog.DebugContext(ctx, "Forwarded a worker allocation decrease",
+		slog.String("pod_uid", workerIdentity.PodUID), slog.Any("resource_delta", req.GetResourceDelta()))
+	return &ateletpb.SubtractWorkerAllocatedResponse{}, nil
 }
 
 // GetActorEgressPolicy reads the egress policy of an actor.

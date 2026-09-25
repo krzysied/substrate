@@ -70,6 +70,16 @@ func ValidateRegisterWorkerRequest(ctx context.Context, req *ateletpb.RegisterWo
 	return Validate_RegisterWorkerRequest(ctx, operation.Operation{Type: operation.Create}, nil, req, nil)
 }
 
+// ValidateAddWorkerAllocatedRequest runs the generated validation for req.
+func ValidateAddWorkerAllocatedRequest(ctx context.Context, req *ateletpb.AddWorkerAllocatedRequest) field.ErrorList {
+	return Validate_AddWorkerAllocatedRequest(ctx, operation.Operation{Type: operation.Create}, nil, req, nil)
+}
+
+// ValidateSubtractWorkerAllocatedRequest runs the generated validation for req.
+func ValidateSubtractWorkerAllocatedRequest(ctx context.Context, req *ateletpb.SubtractWorkerAllocatedRequest) field.ErrorList {
+	return Validate_SubtractWorkerAllocatedRequest(ctx, operation.Operation{Type: operation.Create}, nil, req, nil)
+}
+
 // ValidateCustom_Limits validates one limit with resources.ValidateLimit, the
 // rule the control plane applies to its own Limits. Presence and uniqueness
 // of names are enforced by tags.
