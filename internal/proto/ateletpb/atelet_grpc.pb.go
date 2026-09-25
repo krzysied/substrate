@@ -33,10 +33,12 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	WorkerSupport_MintActorCertificate_FullMethodName = "/atelet.WorkerSupport/MintActorCertificate"
-	WorkerSupport_RegisterWorker_FullMethodName       = "/atelet.WorkerSupport/RegisterWorker"
-	WorkerSupport_RequestActorSuspend_FullMethodName  = "/atelet.WorkerSupport/RequestActorSuspend"
-	WorkerSupport_GetActorEgressPolicy_FullMethodName = "/atelet.WorkerSupport/GetActorEgressPolicy"
+	WorkerSupport_MintActorCertificate_FullMethodName    = "/atelet.WorkerSupport/MintActorCertificate"
+	WorkerSupport_RegisterWorker_FullMethodName          = "/atelet.WorkerSupport/RegisterWorker"
+	WorkerSupport_AddWorkerAllocated_FullMethodName      = "/atelet.WorkerSupport/AddWorkerAllocated"
+	WorkerSupport_SubtractWorkerAllocated_FullMethodName = "/atelet.WorkerSupport/SubtractWorkerAllocated"
+	WorkerSupport_RequestActorSuspend_FullMethodName     = "/atelet.WorkerSupport/RequestActorSuspend"
+	WorkerSupport_GetActorEgressPolicy_FullMethodName    = "/atelet.WorkerSupport/GetActorEgressPolicy"
 )
 
 // WorkerSupportClient is the client API for WorkerSupport service.
@@ -56,6 +58,11 @@ type WorkerSupportClient interface {
 	MintActorCertificate(ctx context.Context, in *MintActorCertificateRequest, opts ...grpc.CallOption) (*MintActorCertificateResponse, error)
 	// Register capacity and supported sandbox runtimes for this worker with atelet.
 	RegisterWorker(ctx context.Context, in *RegisterWorkerRequest, opts ...grpc.CallOption) (*RegisterWorkerResponse, error)
+	// AddWorkerAllocated and SubtractWorkerAllocated move this worker's
+	// allocated resources by a delta, for atelet to forward to the control
+	// plane's WorkerService, which these mirror.
+	AddWorkerAllocated(ctx context.Context, in *AddWorkerAllocatedRequest, opts ...grpc.CallOption) (*AddWorkerAllocatedResponse, error)
+	SubtractWorkerAllocated(ctx context.Context, in *SubtractWorkerAllocatedRequest, opts ...grpc.CallOption) (*SubtractWorkerAllocatedResponse, error)
 	// RequestActorSuspend asks that the actor this worker hosts be suspended,
 	// for atelet to forward to the control plane's WorkerService, which this
 	// mirrors.
@@ -101,6 +108,26 @@ func (c *workerSupportClient) RegisterWorker(ctx context.Context, in *RegisterWo
 	return out, nil
 }
 
+func (c *workerSupportClient) AddWorkerAllocated(ctx context.Context, in *AddWorkerAllocatedRequest, opts ...grpc.CallOption) (*AddWorkerAllocatedResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddWorkerAllocatedResponse)
+	err := c.cc.Invoke(ctx, WorkerSupport_AddWorkerAllocated_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workerSupportClient) SubtractWorkerAllocated(ctx context.Context, in *SubtractWorkerAllocatedRequest, opts ...grpc.CallOption) (*SubtractWorkerAllocatedResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SubtractWorkerAllocatedResponse)
+	err := c.cc.Invoke(ctx, WorkerSupport_SubtractWorkerAllocated_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *workerSupportClient) RequestActorSuspend(ctx context.Context, in *RequestActorSuspendRequest, opts ...grpc.CallOption) (*RequestActorSuspendResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(RequestActorSuspendResponse)
@@ -138,6 +165,11 @@ type WorkerSupportServer interface {
 	MintActorCertificate(context.Context, *MintActorCertificateRequest) (*MintActorCertificateResponse, error)
 	// Register capacity and supported sandbox runtimes for this worker with atelet.
 	RegisterWorker(context.Context, *RegisterWorkerRequest) (*RegisterWorkerResponse, error)
+	// AddWorkerAllocated and SubtractWorkerAllocated move this worker's
+	// allocated resources by a delta, for atelet to forward to the control
+	// plane's WorkerService, which these mirror.
+	AddWorkerAllocated(context.Context, *AddWorkerAllocatedRequest) (*AddWorkerAllocatedResponse, error)
+	SubtractWorkerAllocated(context.Context, *SubtractWorkerAllocatedRequest) (*SubtractWorkerAllocatedResponse, error)
 	// RequestActorSuspend asks that the actor this worker hosts be suspended,
 	// for atelet to forward to the control plane's WorkerService, which this
 	// mirrors.
@@ -168,6 +200,12 @@ func (UnimplementedWorkerSupportServer) MintActorCertificate(context.Context, *M
 }
 func (UnimplementedWorkerSupportServer) RegisterWorker(context.Context, *RegisterWorkerRequest) (*RegisterWorkerResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RegisterWorker not implemented")
+}
+func (UnimplementedWorkerSupportServer) AddWorkerAllocated(context.Context, *AddWorkerAllocatedRequest) (*AddWorkerAllocatedResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AddWorkerAllocated not implemented")
+}
+func (UnimplementedWorkerSupportServer) SubtractWorkerAllocated(context.Context, *SubtractWorkerAllocatedRequest) (*SubtractWorkerAllocatedResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubtractWorkerAllocated not implemented")
 }
 func (UnimplementedWorkerSupportServer) RequestActorSuspend(context.Context, *RequestActorSuspendRequest) (*RequestActorSuspendResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RequestActorSuspend not implemented")
@@ -232,6 +270,42 @@ func _WorkerSupport_RegisterWorker_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _WorkerSupport_AddWorkerAllocated_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddWorkerAllocatedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkerSupportServer).AddWorkerAllocated(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkerSupport_AddWorkerAllocated_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkerSupportServer).AddWorkerAllocated(ctx, req.(*AddWorkerAllocatedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkerSupport_SubtractWorkerAllocated_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubtractWorkerAllocatedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkerSupportServer).SubtractWorkerAllocated(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkerSupport_SubtractWorkerAllocated_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkerSupportServer).SubtractWorkerAllocated(ctx, req.(*SubtractWorkerAllocatedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _WorkerSupport_RequestActorSuspend_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(RequestActorSuspendRequest)
 	if err := dec(in); err != nil {
@@ -282,6 +356,14 @@ var WorkerSupport_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RegisterWorker",
 			Handler:    _WorkerSupport_RegisterWorker_Handler,
+		},
+		{
+			MethodName: "AddWorkerAllocated",
+			Handler:    _WorkerSupport_AddWorkerAllocated_Handler,
+		},
+		{
+			MethodName: "SubtractWorkerAllocated",
+			Handler:    _WorkerSupport_SubtractWorkerAllocated_Handler,
 		},
 		{
 			MethodName: "RequestActorSuspend",

@@ -1928,6 +1928,8 @@ var Control_ServiceDesc = grpc.ServiceDesc{
 
 const (
 	WorkerService_RegisterWorker_FullMethodName             = "/ateapi.WorkerService/RegisterWorker"
+	WorkerService_AddWorkerAllocated_FullMethodName         = "/ateapi.WorkerService/AddWorkerAllocated"
+	WorkerService_SubtractWorkerAllocated_FullMethodName    = "/ateapi.WorkerService/SubtractWorkerAllocated"
 	WorkerService_MintWorkerActorCertificate_FullMethodName = "/ateapi.WorkerService/MintWorkerActorCertificate"
 	WorkerService_MintWorkerActorJwt_FullMethodName         = "/ateapi.WorkerService/MintWorkerActorJwt"
 	WorkerService_RequestActorSuspend_FullMethodName        = "/ateapi.WorkerService/RequestActorSuspend"
@@ -1954,6 +1956,23 @@ type WorkerServiceClient interface {
 	// MintCert. Idempotent: re-sending the same capacity and runtimes is not a
 	// write.
 	RegisterWorker(ctx context.Context, in *RegisterWorkerRequest, opts ...grpc.CallOption) (*RegisterWorkerResponse, error)
+	// AddWorkerAllocated increases a Worker's allocated resources by a delta, for
+	// worker-level overcommit: the Worker, which alone observes what its Actors
+	// actually use, books more when usage outgrows what is allocated, shrinking
+	// its headroom.
+	//
+	// atelet calls this with its own client certificate, as it does for
+	// RegisterWorker. Not idempotent: each accepted call moves the total.
+	AddWorkerAllocated(ctx context.Context, in *AddWorkerAllocatedRequest, opts ...grpc.CallOption) (*AddWorkerAllocatedResponse, error)
+	// SubtractWorkerAllocated decreases a Worker's allocated resources by a
+	// delta, for worker-level overcommit: placement books an Actor's full
+	// declared limits, and the Worker hands back what it predicts its Actors
+	// will not use, reclaiming headroom. Each dimension is clamped at zero, so
+	// allocation never goes negative.
+	//
+	// atelet calls this with its own client certificate, as it does for
+	// RegisterWorker. Not idempotent: each accepted call moves the total.
+	SubtractWorkerAllocated(ctx context.Context, in *SubtractWorkerAllocatedRequest, opts ...grpc.CallOption) (*SubtractWorkerAllocatedResponse, error)
 	// Create a Substrate-issued SPIFFE certificate that asserts a worker acting
 	// on behalf of a particular actor.
 	//
@@ -2023,6 +2042,26 @@ func (c *workerServiceClient) RegisterWorker(ctx context.Context, in *RegisterWo
 	return out, nil
 }
 
+func (c *workerServiceClient) AddWorkerAllocated(ctx context.Context, in *AddWorkerAllocatedRequest, opts ...grpc.CallOption) (*AddWorkerAllocatedResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(AddWorkerAllocatedResponse)
+	err := c.cc.Invoke(ctx, WorkerService_AddWorkerAllocated_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *workerServiceClient) SubtractWorkerAllocated(ctx context.Context, in *SubtractWorkerAllocatedRequest, opts ...grpc.CallOption) (*SubtractWorkerAllocatedResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(SubtractWorkerAllocatedResponse)
+	err := c.cc.Invoke(ctx, WorkerService_SubtractWorkerAllocated_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *workerServiceClient) MintWorkerActorCertificate(ctx context.Context, in *MintWorkerActorCertificateRequest, opts ...grpc.CallOption) (*MintWorkerActorCertificateResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(MintWorkerActorCertificateResponse)
@@ -2083,6 +2122,23 @@ type WorkerServiceServer interface {
 	// MintCert. Idempotent: re-sending the same capacity and runtimes is not a
 	// write.
 	RegisterWorker(context.Context, *RegisterWorkerRequest) (*RegisterWorkerResponse, error)
+	// AddWorkerAllocated increases a Worker's allocated resources by a delta, for
+	// worker-level overcommit: the Worker, which alone observes what its Actors
+	// actually use, books more when usage outgrows what is allocated, shrinking
+	// its headroom.
+	//
+	// atelet calls this with its own client certificate, as it does for
+	// RegisterWorker. Not idempotent: each accepted call moves the total.
+	AddWorkerAllocated(context.Context, *AddWorkerAllocatedRequest) (*AddWorkerAllocatedResponse, error)
+	// SubtractWorkerAllocated decreases a Worker's allocated resources by a
+	// delta, for worker-level overcommit: placement books an Actor's full
+	// declared limits, and the Worker hands back what it predicts its Actors
+	// will not use, reclaiming headroom. Each dimension is clamped at zero, so
+	// allocation never goes negative.
+	//
+	// atelet calls this with its own client certificate, as it does for
+	// RegisterWorker. Not idempotent: each accepted call moves the total.
+	SubtractWorkerAllocated(context.Context, *SubtractWorkerAllocatedRequest) (*SubtractWorkerAllocatedResponse, error)
 	// Create a Substrate-issued SPIFFE certificate that asserts a worker acting
 	// on behalf of a particular actor.
 	//
@@ -2145,6 +2201,12 @@ type UnimplementedWorkerServiceServer struct{}
 func (UnimplementedWorkerServiceServer) RegisterWorker(context.Context, *RegisterWorkerRequest) (*RegisterWorkerResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method RegisterWorker not implemented")
 }
+func (UnimplementedWorkerServiceServer) AddWorkerAllocated(context.Context, *AddWorkerAllocatedRequest) (*AddWorkerAllocatedResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method AddWorkerAllocated not implemented")
+}
+func (UnimplementedWorkerServiceServer) SubtractWorkerAllocated(context.Context, *SubtractWorkerAllocatedRequest) (*SubtractWorkerAllocatedResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method SubtractWorkerAllocated not implemented")
+}
 func (UnimplementedWorkerServiceServer) MintWorkerActorCertificate(context.Context, *MintWorkerActorCertificateRequest) (*MintWorkerActorCertificateResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method MintWorkerActorCertificate not implemented")
 }
@@ -2192,6 +2254,42 @@ func _WorkerService_RegisterWorker_Handler(srv interface{}, ctx context.Context,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(WorkerServiceServer).RegisterWorker(ctx, req.(*RegisterWorkerRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkerService_AddWorkerAllocated_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(AddWorkerAllocatedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkerServiceServer).AddWorkerAllocated(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkerService_AddWorkerAllocated_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkerServiceServer).AddWorkerAllocated(ctx, req.(*AddWorkerAllocatedRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _WorkerService_SubtractWorkerAllocated_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(SubtractWorkerAllocatedRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(WorkerServiceServer).SubtractWorkerAllocated(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: WorkerService_SubtractWorkerAllocated_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(WorkerServiceServer).SubtractWorkerAllocated(ctx, req.(*SubtractWorkerAllocatedRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -2278,6 +2376,14 @@ var WorkerService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "RegisterWorker",
 			Handler:    _WorkerService_RegisterWorker_Handler,
+		},
+		{
+			MethodName: "AddWorkerAllocated",
+			Handler:    _WorkerService_AddWorkerAllocated_Handler,
+		},
+		{
+			MethodName: "SubtractWorkerAllocated",
+			Handler:    _WorkerService_SubtractWorkerAllocated_Handler,
 		},
 		{
 			MethodName: "MintWorkerActorCertificate",
