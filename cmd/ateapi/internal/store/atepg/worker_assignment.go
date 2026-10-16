@@ -138,9 +138,21 @@ func (p *Persistence) BindActorToWorker(ctx context.Context, workerName string, 
 
 		// Subtract before adding: the Actor is already counted, and its
 		// declared size may have changed.
-		allocated, err := resources.AddToAllocated(worker.Status.Allocated, previous, -1)
-		if err != nil {
-			return nil, err
+		var allocated *ateapipb.WorkerResources
+		if p.overcommitEnabled {
+			// Under overcommit the Worker may already have handed some of
+			// the previous booking back, so each dimension is clamped at
+			// zero instead of going negative.
+			allocated, err = resources.SubtractResourcesFromAllocated(worker.Status.Allocated, previous.GetResources())
+			if err != nil {
+				return nil, fmt.Errorf("unbooking actor %s: %w", actorUID, err)
+			}
+			allocated = resources.AddActorCountOnly(allocated, -1)
+		} else {
+			allocated, err = resources.AddToAllocated(worker.Status.Allocated, previous, -1)
+			if err != nil {
+				return nil, err
+			}
 		}
 		worker.Status.Allocated = allocated
 
@@ -214,11 +226,22 @@ func (p *Persistence) ReleaseActorFromWorker(ctx context.Context, workerName str
 		if worker.Status == nil {
 			worker.Status = &ateapipb.WorkerStatus{}
 		}
-		allocated, err := resources.AddToAllocated(worker.Status.Allocated, assignment, -1)
-		if err != nil {
-			return nil, err
+		if p.overcommitEnabled {
+			// Under overcommit the ateworker hands the Actor's resources
+			// back through SubtractWorkerAllocated, so a release frees only
+			// its slot.
+			// TODO: an Actor that was bound but never tracked by the
+			// ateworker (it failed before starting, or the ateworker
+			// restarted) never has its resources handed back, and they stay
+			// allocated until the Worker goes away.
+			worker.Status.Allocated = resources.AddActorCountOnly(worker.Status.Allocated, -1)
+		} else {
+			allocated, err := resources.AddToAllocated(worker.Status.Allocated, assignment, -1)
+			if err != nil {
+				return nil, err
+			}
+			worker.Status.Allocated = allocated
 		}
-		worker.Status.Allocated = allocated
 		if err := saveWorker(ctx, tx, worker); err != nil {
 			return nil, err
 		}

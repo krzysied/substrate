@@ -106,6 +106,7 @@ var (
 	drainTimeout = pflag.Duration("drain-timeout", 15*time.Second, "Deadline for the graceful gRPC drain on shutdown. In-flight RPCs still running past it are forcefully cancelled.")
 
 	objectStorePluginSocket = pflag.String("objectstore-plugin-socket", "/run/objectstore-plugin/control.sock", "Unix socket of the control object-store plugin that external snapshots are deleted and copied through.")
+	enableOvercommit        = pflag.Bool("enable-overcommit", false, "Enable worker-level overcommit accounting: a released Actor frees only its slot, and ateworkers hand back unused resources through SubtractWorkerAllocated. Must match the setting of the ateworkers.")
 
 	templateResyncInterval = pflag.Duration("template-resync-interval", 20*time.Second, fmt.Sprintf("Interval between actor template resyncs. Must be at least %s.", minResyncInterval))
 
@@ -197,6 +198,7 @@ func main() {
 	if err != nil {
 		serverboot.Fatal(ctx, "Failed to set up persistence backend", err)
 	}
+	persistence.SetOvercommitEnabled(*enableOvercommit)
 	pool := persistence.Pool()
 	defer pool.Close()
 	// Backends may run background maintenance rooted in their own context
@@ -486,6 +488,7 @@ func logFlagValues(ctx context.Context) {
 		slog.Duration("drain-delay", *drainDelay),
 		slog.Duration("drain-timeout", *drainTimeout),
 		slog.Any("preview", *previewFlags),
+		slog.Bool("enable-overcommit", *enableOvercommit),
 	)
 }
 

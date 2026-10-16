@@ -16,6 +16,8 @@ package resources
 
 import (
 	"fmt"
+	"maps"
+	"slices"
 
 	"github.com/agent-substrate/substrate/pkg/proto/ateapipb"
 )
@@ -46,6 +48,77 @@ func AddToAllocated(total *ateapipb.WorkerResources, assignment *ateapipb.ActorA
 		return nil, nil
 	}
 	return &ateapipb.WorkerResources{Actors: actors, Resources: resources}, nil
+}
+
+// AddActorCountOnly adjusts the actor count by deltaActors and leaves resources
+// untouched. Under worker-level overcommit a released Actor's resources are
+// handed back by the Worker rather than by the release, so only its slot moves
+// here. The count is clamped at zero. It returns nil when allocation reaches
+// zero.
+func AddActorCountOnly(total *ateapipb.WorkerResources, deltaActors int32) *ateapipb.WorkerResources {
+	actors := max(total.GetActors()+deltaActors, 0)
+	resources := total.GetResources()
+	if actors == 0 && len(resources.GetLimits()) == 0 {
+		return nil
+	}
+	return &ateapipb.WorkerResources{Actors: actors, Resources: resources}
+}
+
+// SubtractResourcesFromAllocated subtracts delta from the allocated resources
+// and leaves the actor count untouched. Every quantity in delta must be
+// non-negative. Each dimension is clamped at zero, so a Worker handing back
+// more than is booked empties that dimension instead of driving it negative.
+// It returns nil when allocation reaches zero.
+func SubtractResourcesFromAllocated(total *ateapipb.WorkerResources, delta *ateapipb.Resources) (*ateapipb.WorkerResources, error) {
+	held, d, err := parseAllocationDelta(total, delta)
+	if err != nil {
+		return nil, err
+	}
+	for name, quantity := range d {
+		existing, ok := held[name]
+		if !ok {
+			continue // nothing held to subtract from
+		}
+		existing.Sub(quantity)
+		if existing.Sign() <= 0 {
+			delete(held, name)
+			continue
+		}
+		held[name] = existing
+	}
+	return withResources(total.GetActors(), held), nil
+}
+
+// parseAllocationDelta parses the held allocation and a delta, refusing a
+// delta with a negative quantity: direction comes from which helper is called,
+// never from the sign of a quantity.
+func parseAllocationDelta(total *ateapipb.WorkerResources, delta *ateapipb.Resources) (Quantities, Quantities, error) {
+	held, err := ParseQuantities(total.GetResources())
+	if err != nil {
+		return nil, nil, fmt.Errorf("allocated: %w", err)
+	}
+	d, err := ParseQuantities(delta)
+	if err != nil {
+		return nil, nil, fmt.Errorf("delta: %w", err)
+	}
+	for _, name := range slices.Sorted(maps.Keys(d)) {
+		if quantity := d[name]; quantity.Sign() < 0 {
+			return nil, nil, fmt.Errorf("delta %s is %s, must not be negative", name, quantity.String())
+		}
+	}
+	if held == nil {
+		held = Quantities{}
+	}
+	return held, d, nil
+}
+
+// withResources builds an allocation, or nil when it holds nothing.
+func withResources(actors int32, held Quantities) *ateapipb.WorkerResources {
+	resources := held.Proto()
+	if actors == 0 && resources == nil {
+		return nil
+	}
+	return &ateapipb.WorkerResources{Actors: actors, Resources: resources}
 }
 
 // SumAllocated is what a set of assignments takes from a Worker, or nil for

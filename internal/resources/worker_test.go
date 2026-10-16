@@ -106,3 +106,153 @@ func TestSumAllocated(t *testing.T) {
 		t.Errorf("SumAllocated() mismatch (-want +got):\n%s", diff)
 	}
 }
+
+// Under overcommit a release frees the slot but leaves resources to the
+// Worker, and a Worker holding nothing still carries no allocation at all.
+func TestAddActorCountOnly(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		total *ateapipb.WorkerResources
+		delta int32
+		want  *ateapipb.WorkerResources
+	}{
+		{
+			name:  "release keeps resources",
+			total: &ateapipb.WorkerResources{Actors: 2, Resources: CPUMemory(1500, 3<<30)},
+			delta: -1,
+			want:  &ateapipb.WorkerResources{Actors: 1, Resources: CPUMemory(1500, 3<<30)},
+		},
+		{
+			name:  "increment",
+			total: &ateapipb.WorkerResources{Actors: 1, Resources: CPUMemory(1500, 3<<30)},
+			delta: +1,
+			want:  &ateapipb.WorkerResources{Actors: 2, Resources: CPUMemory(1500, 3<<30)},
+		},
+		{
+			name:  "count clamps at zero",
+			total: &ateapipb.WorkerResources{Resources: CPUMemory(100, 0)},
+			delta: -1,
+			want:  &ateapipb.WorkerResources{Resources: CPUMemory(100, 0)},
+		},
+		{
+			name:  "emptied is nil",
+			total: &ateapipb.WorkerResources{Actors: 1},
+			delta: -1,
+			want:  nil,
+		},
+		{
+			name:  "nil stays nil",
+			total: nil,
+			delta: -1,
+			want:  nil,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := AddActorCountOnly(tc.total, tc.delta)
+			if diff := cmp.Diff(tc.want, got, protocmp.Transform()); diff != "" {
+				t.Errorf("AddActorCountOnly() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+// badDeltas are refused by SubtractResourcesFromAllocated.
+var badDeltas = []struct {
+	name  string
+	total *ateapipb.WorkerResources
+	delta *ateapipb.Resources
+}{
+	{
+		name:  "negative quantity",
+		total: &ateapipb.WorkerResources{Actors: 1, Resources: CPUMemory(500, 0)},
+		delta: &ateapipb.Resources{Limits: []*ateapipb.Limits{{Name: ResourceCPU, Quantity: "-100m"}}},
+	},
+	{
+		name:  "unparseable delta",
+		total: &ateapipb.WorkerResources{Actors: 1},
+		delta: &ateapipb.Resources{Limits: []*ateapipb.Limits{{Name: ResourceCPU, Quantity: "two"}}},
+	},
+	{
+		name:  "unparseable allocation",
+		total: &ateapipb.WorkerResources{Actors: 1, Resources: &ateapipb.Resources{Limits: []*ateapipb.Limits{{Name: ResourceCPU, Quantity: "two"}}}},
+		delta: CPUMemory(1, 0),
+	},
+}
+
+func TestSubtractResourcesFromAllocated(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		total *ateapipb.WorkerResources
+		delta *ateapipb.Resources
+		want  *ateapipb.WorkerResources
+	}{
+		{
+			name:  "reclaim",
+			total: &ateapipb.WorkerResources{Actors: 2, Resources: CPUMemory(2000, 4<<30)},
+			delta: CPUMemory(1500, 1<<30),
+			want:  &ateapipb.WorkerResources{Actors: 2, Resources: CPUMemory(500, 3<<30)},
+		},
+		{
+			name:  "one dimension clamps at zero, the other stays",
+			total: &ateapipb.WorkerResources{Actors: 1, Resources: CPUMemory(500, 1<<30)},
+			delta: CPUMemory(900, 512<<20),
+			want:  &ateapipb.WorkerResources{Actors: 1, Resources: CPUMemory(0, 512<<20)},
+		},
+		{
+			name:  "exactly to zero",
+			total: &ateapipb.WorkerResources{Actors: 1, Resources: CPUMemory(500, 1<<30)},
+			delta: CPUMemory(500, 0),
+			want:  &ateapipb.WorkerResources{Actors: 1, Resources: CPUMemory(0, 1<<30)},
+		},
+		{
+			name:  "absent dimension stays absent",
+			total: &ateapipb.WorkerResources{Actors: 1, Resources: CPUMemory(500, 0)},
+			delta: CPUMemory(0, 1<<30),
+			want:  &ateapipb.WorkerResources{Actors: 1, Resources: CPUMemory(500, 0)},
+		},
+		{
+			name:  "from nothing stays nothing",
+			total: nil,
+			delta: CPUMemory(500, 1<<30),
+			want:  nil,
+		},
+		{
+			name:  "emptied with no actors is nil",
+			total: &ateapipb.WorkerResources{Resources: CPUMemory(500, 1<<30)},
+			delta: CPUMemory(500, 2<<30),
+			want:  nil,
+		},
+		{
+			name:  "emptied with actors keeps the count",
+			total: &ateapipb.WorkerResources{Actors: 2, Resources: CPUMemory(500, 1<<30)},
+			delta: CPUMemory(9000, 9<<30),
+			want:  &ateapipb.WorkerResources{Actors: 2},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := SubtractResourcesFromAllocated(tc.total, tc.delta)
+			if err != nil {
+				t.Fatalf("SubtractResourcesFromAllocated(): %v", err)
+			}
+			if diff := cmp.Diff(tc.want, got, protocmp.Transform()); diff != "" {
+				t.Errorf("SubtractResourcesFromAllocated() mismatch (-want +got):\n%s", diff)
+			}
+			held, err := ParseQuantities(got.GetResources())
+			if err != nil {
+				t.Fatalf("ParseQuantities(result): %v", err)
+			}
+			for name, quantity := range held {
+				if quantity.Sign() < 0 {
+					t.Errorf("result holds %s = %s, want never negative", name, quantity.String())
+				}
+			}
+		})
+	}
+	for _, tc := range badDeltas {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, err := SubtractResourcesFromAllocated(tc.total, tc.delta); err == nil {
+				t.Fatalf("SubtractResourcesFromAllocated() = %v, want an error", got)
+			}
+		})
+	}
+}
