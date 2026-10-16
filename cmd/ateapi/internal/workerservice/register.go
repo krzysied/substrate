@@ -52,22 +52,9 @@ func (s *Server) RegisterWorker(ctx context.Context, req *ateapipb.RegisterWorke
 		sortAttributes(rt)
 	}
 
-	// Use authoritative state to authorize the write.
-	worker, err := s.store.GetWorker(ctx, name)
+	worker, err := s.authorizeWorkerNode(ctx, caller, name, "capacity report")
 	if err != nil {
-		if errors.Is(err, store.ErrNotFound) {
-			return nil, apierror.NotFound("Worker %s not found", name)
-		}
-		return nil, fmt.Errorf("while fetching worker %s: %w", name, err)
-	}
-	if worker.GetNodeName() != caller.NodeName {
-		// Do not disclose Workers on other nodes.
-		slog.WarnContext(ctx, "Refusing a capacity report for a worker on another node",
-			slog.String("worker", name),
-			slog.String("worker_node", worker.GetNodeName()),
-			slog.String("caller_node", caller.NodeName),
-			slog.String("caller_pod", caller.PodName))
-		return nil, apierror.NotFound("Worker %s not found", name)
+		return nil, err
 	}
 	if err := validateRuntimeClasses(worker.GetSandboxClass(), req); err != nil {
 		return nil, err
@@ -105,6 +92,29 @@ func (s *Server) RegisterWorker(ctx context.Context, req *ateapipb.RegisterWorke
 		slog.String("default_runtime", updated.GetStatus().GetDefaultRuntime().String()),
 		slog.Int("restorable_runtimes", len(updated.GetStatus().GetRestorableRuntimes())))
 	return &ateapipb.RegisterWorkerResponse{Worker: updated}, nil
+}
+
+// authorizeWorkerNode reads the Worker named name from authoritative state and
+// confirms it runs on the caller's node. what names the refused request in the
+// log. A Worker on another node is reported as not found, so Workers on other
+// nodes are not disclosed.
+func (s *Server) authorizeWorkerNode(ctx context.Context, caller *ateletauth.Caller, name, what string) (*ateapipb.Worker, error) {
+	worker, err := s.store.GetWorker(ctx, name)
+	if err != nil {
+		if errors.Is(err, store.ErrNotFound) {
+			return nil, apierror.NotFound("Worker %s not found", name)
+		}
+		return nil, fmt.Errorf("while fetching worker %s: %w", name, err)
+	}
+	if worker.GetNodeName() != caller.NodeName {
+		slog.WarnContext(ctx, "Refusing a "+what+" for a worker on another node",
+			slog.String("worker", name),
+			slog.String("worker_node", worker.GetNodeName()),
+			slog.String("caller_node", caller.NodeName),
+			slog.String("caller_pod", caller.PodName))
+		return nil, apierror.NotFound("Worker %s not found", name)
+	}
+	return worker, nil
 }
 
 // validateRuntimeClasses rejects a runtime of a class other than the Worker's

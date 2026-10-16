@@ -77,6 +77,16 @@ func ValidateRegisterWorkerRequest(ctx context.Context, req *ateapipb.RegisterWo
 	return Validate_RegisterWorkerRequest(ctx, op, nil, req, nil)
 }
 
+func ValidateAddWorkerAllocatedRequest(ctx context.Context, req *ateapipb.AddWorkerAllocatedRequest) field.ErrorList {
+	op := MakeCreateOp(ctx)
+	return Validate_AddWorkerAllocatedRequest(ctx, op, nil, req, nil)
+}
+
+func ValidateSubtractWorkerAllocatedRequest(ctx context.Context, req *ateapipb.SubtractWorkerAllocatedRequest) field.ErrorList {
+	op := MakeCreateOp(ctx)
+	return Validate_SubtractWorkerAllocatedRequest(ctx, op, nil, req, nil)
+}
+
 func ValidateRequestActorSuspendRequest(ctx context.Context, req *ateapipb.RequestActorSuspendRequest) field.ErrorList {
 	op := MakeCreateOp(ctx)
 	return Validate_RequestActorSuspendRequest(ctx, op, nil, req, nil)

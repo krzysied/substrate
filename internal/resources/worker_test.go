@@ -156,7 +156,8 @@ func TestAddActorCountOnly(t *testing.T) {
 	}
 }
 
-// badDeltas are refused by SubtractResourcesFromAllocated.
+// badDeltas are refused by both AddResourcesToAllocated and
+// SubtractResourcesFromAllocated.
 var badDeltas = []struct {
 	name  string
 	total *ateapipb.WorkerResources
@@ -177,6 +178,57 @@ var badDeltas = []struct {
 		total: &ateapipb.WorkerResources{Actors: 1, Resources: &ateapipb.Resources{Limits: []*ateapipb.Limits{{Name: ResourceCPU, Quantity: "two"}}}},
 		delta: CPUMemory(1, 0),
 	},
+}
+
+func TestAddResourcesToAllocated(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		total *ateapipb.WorkerResources
+		delta *ateapipb.Resources
+		want  *ateapipb.WorkerResources
+	}{
+		{
+			name:  "grow",
+			total: &ateapipb.WorkerResources{Actors: 1, Resources: CPUMemory(500, 1<<30)},
+			delta: CPUMemory(250, 1<<30),
+			want:  &ateapipb.WorkerResources{Actors: 1, Resources: CPUMemory(750, 2<<30)},
+		},
+		{
+			name:  "grow a new dimension",
+			total: &ateapipb.WorkerResources{Actors: 1, Resources: CPUMemory(500, 0)},
+			delta: CPUMemory(0, 1<<30),
+			want:  &ateapipb.WorkerResources{Actors: 1, Resources: CPUMemory(500, 1<<30)},
+		},
+		{
+			name:  "grow from nothing",
+			total: nil,
+			delta: CPUMemory(250, 0),
+			want:  &ateapipb.WorkerResources{Resources: CPUMemory(250, 0)},
+		},
+		{
+			name:  "empty delta",
+			total: &ateapipb.WorkerResources{Actors: 3, Resources: CPUMemory(500, 0)},
+			delta: nil,
+			want:  &ateapipb.WorkerResources{Actors: 3, Resources: CPUMemory(500, 0)},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := AddResourcesToAllocated(tc.total, tc.delta)
+			if err != nil {
+				t.Fatalf("AddResourcesToAllocated(): %v", err)
+			}
+			if diff := cmp.Diff(tc.want, got, protocmp.Transform()); diff != "" {
+				t.Errorf("AddResourcesToAllocated() mismatch (-want +got):\n%s", diff)
+			}
+		})
+	}
+	for _, tc := range badDeltas {
+		t.Run(tc.name, func(t *testing.T) {
+			if got, err := AddResourcesToAllocated(tc.total, tc.delta); err == nil {
+				t.Fatalf("AddResourcesToAllocated() = %v, want an error", got)
+			}
+		})
+	}
 }
 
 func TestSubtractResourcesFromAllocated(t *testing.T) {

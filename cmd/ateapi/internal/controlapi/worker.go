@@ -225,6 +225,14 @@ func (s *ServiceImpl) ReleaseActorFromWorker(ctx context.Context, workerName str
 	return s.store.ReleaseActorFromWorker(ctx, workerName, actorUID)
 }
 
+func (s *ServiceImpl) AddWorkerAllocated(ctx context.Context, name string, delta *ateapipb.Resources) (*ateapipb.Worker, error) {
+	return s.store.AddWorkerAllocated(ctx, name, delta)
+}
+
+func (s *ServiceImpl) SubtractWorkerAllocated(ctx context.Context, name string, delta *ateapipb.Resources) (*ateapipb.Worker, error) {
+	return s.store.SubtractWorkerAllocated(ctx, name, delta)
+}
+
 func (s *ServiceImpl) GetWorkerAssignment(ctx context.Context, workerName, actorUID string) (*ateapipb.ActorAssignment, error) {
 	return s.store.GetWorkerAssignment(ctx, workerName, actorUID)
 }

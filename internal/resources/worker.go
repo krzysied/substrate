@@ -64,6 +64,18 @@ func AddActorCountOnly(total *ateapipb.WorkerResources, deltaActors int32) *atea
 	return &ateapipb.WorkerResources{Actors: actors, Resources: resources}
 }
 
+// AddResourcesToAllocated adds delta to the allocated resources and leaves the
+// actor count untouched. Every quantity in delta must be non-negative. It
+// returns nil when allocation reaches zero.
+func AddResourcesToAllocated(total *ateapipb.WorkerResources, delta *ateapipb.Resources) (*ateapipb.WorkerResources, error) {
+	held, d, err := parseAllocationDelta(total, delta)
+	if err != nil {
+		return nil, err
+	}
+	held.Add(d)
+	return withResources(total.GetActors(), held), nil
+}
+
 // SubtractResourcesFromAllocated subtracts delta from the allocated resources
 // and leaves the actor count untouched. Every quantity in delta must be
 // non-negative. Each dimension is clamped at zero, so a Worker handing back

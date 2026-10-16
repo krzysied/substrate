@@ -62,6 +62,10 @@ var (
 	// ErrImmutableField indicates an update's mutation changed a field that is
 	// immutable for the lifetime of the stored object.
 	ErrImmutableField = errors.New("persistence: immutable field")
+
+	// ErrInvalidAllocationDelta indicates an AddWorkerAllocated or
+	// SubtractWorkerAllocated delta with a negative or unparsable quantity.
+	ErrInvalidAllocationDelta = errors.New("persistence: invalid allocation delta")
 )
 
 // Interface defines the contract for the persistence layer storing actor state.
@@ -271,6 +275,17 @@ type Interface interface {
 	// watch-fed cache, which until then reports it full. It returns nil if the
 	// assignment was already absent.
 	ReleaseActorFromWorker(ctx context.Context, workerName string, actorUID string) (*ateapipb.Worker, error)
+
+	// AddWorkerAllocated adds delta to a Worker's allocated resources under
+	// the same row lock that serializes binds and releases, and returns the
+	// Worker as it now stands. The actor count is left alone. Every quantity
+	// must be non-negative; otherwise it returns an error wrapping
+	// ErrInvalidAllocationDelta. ErrNotFound if the Worker is gone.
+	AddWorkerAllocated(ctx context.Context, name string, delta *ateapipb.Resources) (*ateapipb.Worker, error)
+
+	// SubtractWorkerAllocated is AddWorkerAllocated in the other direction,
+	// with each dimension clamped at zero so allocation never goes negative.
+	SubtractWorkerAllocated(ctx context.Context, name string, delta *ateapipb.Resources) (*ateapipb.Worker, error)
 
 	// GetWorkerAssignment returns a Worker's assignment for actorUID, or
 	// ErrNotFound when the Worker is not hosting that Actor.
